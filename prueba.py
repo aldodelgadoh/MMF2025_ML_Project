@@ -332,7 +332,6 @@ categorical_features = [col for col in df.columns if df[col].dtype == 'object']
 print(f'Categorical features to encode: {categorical_features}')
 df = pd.get_dummies(df, columns=categorical_features, drop_first=True)  # drop_first to avoid dummy variable trap
 
-
 # Preprocess Auxiliary Datasets
 
 #Pre-processing bureau_balance
@@ -350,6 +349,11 @@ status_df = buro_balance_grouped['STATUS_DICT'].apply(pd.Series).fillna(0)
 status_df = status_df.add_prefix('STATUS_')
 
 buro_balance_processed = pd.concat([buro_balance_grouped.drop('STATUS_DICT', axis=1), status_df], axis=1)
+
+categorical_features_bureau = [col for col in bureau.columns if bureau[col].dtype == 'object']
+print(f'Categorical features to encode: {categorical_features_bureau}')
+bureau = pd.get_dummies(bureau, columns = categorical_features_bureau, drop_first = True)  # drop_first to avoid dummy variable trap
+
 bureau = bureau.merge(buro_balance_processed, how='left', on='SK_ID_BUREAU')
 
 # Fill NaNs resulting from the merge
@@ -367,17 +371,24 @@ avg_buro = bureau.groupby('SK_ID_CURR').agg({
     'STATUS_4': 'mean',
     'STATUS_5': 'mean',
     'STATUS_C': 'mean',
-    'STATUS_X': 'mean'
+    'STATUS_X': 'mean',
+    'DAYS_CREDIT': 'mean',
+    'CREDIT_DAY_OVERDUE': 'mean'
 })
 
 # Add count of bureau entries per SK_ID_CURR
 avg_buro['buro_count'] = bureau.groupby('SK_ID_CURR')['SK_ID_BUREAU'].count()
 
 #Pre-processing previous_application
-
 # One-hot encode categorical features
 prev_cat_features = [col for col in previous_application.columns if previous_application[col].dtype == 'object']
 previous_application_encoded = pd.get_dummies(previous_application, columns=prev_cat_features, drop_first=True)
+previous_application_encoded['APPLICATION_CREDIT_RATIO'] = previous_application_encoded['AMT_APPLICATION'] / previous_application_encoded['AMT_CREDIT']
+previous_application_encoded['CREDIT_TO_ANNUITY_RATIO'] = previous_application_encoded['AMT_CREDIT']/previous_application_encoded['AMT_ANNUITY']
+previous_application_encoded['DOWN_PAYMENT_TO_CREDIT'] = previous_application_encoded['AMT_DOWN_PAYMENT'] / previous_application_encoded['AMT_CREDIT']
+# Interest ratio on previous application (simplified)
+total_payment = previous_application_encoded['AMT_ANNUITY'] * previous_application_encoded['CNT_PAYMENT']
+previous_application_encoded['SIMPLE_INTERESTS'] = (total_payment/previous_application_encoded['AMT_CREDIT'] - 1)/previous_application_encoded['CNT_PAYMENT']
 
 # Aggregate features by SK_ID_CURR
 avg_prev = previous_application_encoded.groupby('SK_ID_CURR').mean()
@@ -388,17 +399,6 @@ cnt_prev = previous_application_encoded.groupby('SK_ID_CURR').size().rename('nb_
 # Combine aggregated features with counts
 avg_prev = avg_prev.merge(cnt_prev, left_index=True, right_index=True)
 
-#Pre-processing bureau
-# One-hot encode categorical features
-buro_cat_features = [col for col in bureau.columns if bureau[col].dtype == 'object']
-bureau_encoded = pd.get_dummies(bureau, columns=buro_cat_features, drop_first=True)
-
-# Aggregate features by SK_ID_CURR
-avg_bureau = bureau_encoded.groupby('SK_ID_CURR').mean()
-
-# Add count of bureau entries per SK_ID_CURR if not already added
-if 'buro_count' not in avg_buro.columns:
-    avg_bureau['buro_count'] = bureau_encoded.groupby('SK_ID_CURR')['SK_ID_BUREAU'].count()
 
 #Pre-processing POS_CASH_balance
 
@@ -491,3 +491,6 @@ test = test.merge(avg_payments3.reset_index(), how='left', on='SK_ID_CURR')
 test = test[test.columns[data.isnull().mean() < 0.80]]
 data = data[data.columns[data.isnull().mean() < 0.80]]
 print('All databases joined')
+
+data.to_csv('data_final.csv')
+test.to_csv('test.csv')
